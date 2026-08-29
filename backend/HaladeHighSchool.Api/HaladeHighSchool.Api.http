@@ -1,0 +1,101 @@
+@HaladeHighSchool.Api_HostAddress = http://localhost:5006
+
+### Sign in as the seeded administrator
+# @name login
+POST {{HaladeHighSchool.Api_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@haladehighschool.edu",
+  "password": "Admin@12345"
+}
+
+### Capture the token from the login response
+@token = {{login.response.body.accessToken}}
+
+### Current profile
+GET {{HaladeHighSchool.Api_HostAddress}}/api/auth/me
+Authorization: Bearer {{token}}
+
+### Student roster
+GET {{HaladeHighSchool.Api_HostAddress}}/api/students?page=1&pageSize=25
+Authorization: Bearer {{token}}
+
+### Roster counts per grade and section
+GET {{HaladeHighSchool.Api_HostAddress}}/api/students/summary
+Authorization: Bearer {{token}}
+
+### Enrol a student (GradeLevelId 2 = Grade 10, SectionId 1 = Section A)
+POST {{HaladeHighSchool.Api_HostAddress}}/api/students
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "email": "lensa.tolera@halade.edu",
+  "fullName": "Lensa Tolera",
+  "gradeLevelId": 2,
+  "sectionId": 1,
+  "gender": "Female",
+  "dateOfBirth": "2010-04-11",
+  "guardianName": "Tolera G."
+}
+
+### Move a student to another grade or section
+PUT {{HaladeHighSchool.Api_HostAddress}}/api/students/1/assignment
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "gradeLevelId": 2,
+  "sectionId": 2
+}
+
+### Issue a new temporary password
+POST {{HaladeHighSchool.Api_HostAddress}}/api/students/1/reset-password
+Authorization: Bearer {{token}}
+
+### Assessment weighting (Quiz 10, Assignment 10, Test 20, MidExam 30, FinalExam 30)
+GET {{HaladeHighSchool.Api_HostAddress}}/api/marks/weights
+Authorization: Bearer {{token}}
+
+### Mark-entry sheet for an assessment
+GET {{HaladeHighSchool.Api_HostAddress}}/api/marks/assessment/1
+Authorization: Bearer {{token}}
+
+### Enter a whole class at once
+POST {{HaladeHighSchool.Api_HostAddress}}/api/marks/bulk
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "assessmentId": 1,
+  "isPublished": false,
+  "entries": [
+    { "studentId": 1, "score": 80, "remark": "Good work" }
+  ]
+}
+
+### Publish every mark for an assessment
+PUT {{HaladeHighSchool.Api_HostAddress}}/api/marks/assessment/1/publish
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "isPublished": true
+}
+
+### Weighted report card for a student
+GET {{HaladeHighSchool.Api_HostAddress}}/api/marks/student/1/report-card
+Authorization: Bearer {{token}}
+
+### Student's own published marks (requires a student token)
+GET {{HaladeHighSchool.Api_HostAddress}}/api/marks/me
+Authorization: Bearer {{token}}
+
+### Rotate the access token
+POST {{HaladeHighSchool.Api_HostAddress}}/api/auth/refresh
+Content-Type: application/json
+
+{
+  "refreshToken": "{{login.response.body.refreshToken}}"
+}
