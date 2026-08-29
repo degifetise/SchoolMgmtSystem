@@ -5,7 +5,6 @@ using HaladeHighSchool.Api.Configuration;
 using HaladeHighSchool.Api.Data;
 using HaladeHighSchool.Api.DTOs;
 using HaladeHighSchool.Api.Models;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -15,16 +14,11 @@ namespace HaladeHighSchool.Api.Services;
 public class TokenService : ITokenService
 {
     private readonly ApplicationDbContext _db;
-    private readonly UserManager<ApplicationUser> _userManager;
     private readonly JwtSettings _jwt;
 
-    public TokenService(
-        ApplicationDbContext db,
-        UserManager<ApplicationUser> userManager,
-        IOptions<JwtSettings> jwtOptions)
+    public TokenService(ApplicationDbContext db, IOptions<JwtSettings> jwtOptions)
     {
         _db = db;
-        _userManager = userManager;
         _jwt = jwtOptions.Value;
     }
 
@@ -99,21 +93,37 @@ public class TokenService : ITokenService
         return true;
     }
 
+    /// <summary>
+    /// The roles, the student record and the teacher record in one round trip.
+    ///
+    /// A user is a student or a teacher or neither, and both sides are one-to-one with the
+    /// account, so this is a pair of outer joins rather than three separate lookups. Sign-in and
+    /// token refresh are the only callers, and both were paying for all three.
+    /// </summary>
     public async Task<UserProfileResponse> BuildProfileAsync(
         ApplicationUser user,
         CancellationToken cancellationToken = default)
     {
-        var roles = await _userManager.GetRolesAsync(user);
-
-        var student = await _db.Students
+        var profile = await _db.Users
             .AsNoTracking()
-            .Include(s => s.GradeLevel)
-            .Include(s => s.Section)
-            .FirstOrDefaultAsync(s => s.UserId == user.Id, cancellationToken);
-
-        var teacher = await _db.Teachers
-            .AsNoTracking()
-            .FirstOrDefaultAsync(t => t.UserId == user.Id, cancellationToken);
+            .Where(u => u.Id == user.Id)
+            .Select(u => new
+            {
+                Roles = (from userRole in _db.UserRoles
+                         join role in _db.Roles on userRole.RoleId equals role.Id
+                         where userRole.UserId == u.Id
+                         select role.Name!).ToList(),
+                StudentId = (int?)u.Student!.Id,
+                u.Student!.StudentIdNumber,
+                GradeLevelId = (int?)u.Student!.GradeLevelId,
+                GradeLevelName = u.Student!.GradeLevel!.Name,
+                SectionId = (int?)u.Student!.SectionId,
+                SectionName = u.Student!.Section!.Name,
+                TeacherId = (int?)u.Teacher!.Id,
+                u.Teacher!.EmployeeId,
+                u.Teacher!.Specialization
+            })
+            .FirstOrDefaultAsync(cancellationToken);
 
         return new UserProfileResponse
         {
@@ -121,16 +131,16 @@ public class TokenService : ITokenService
             Email = user.Email ?? string.Empty,
             FullName = user.FullName,
             ProfileImageUrl = user.ProfileImageUrl,
-            Roles = roles.ToList(),
-            StudentId = student?.Id,
-            StudentIdNumber = student?.StudentIdNumber,
-            GradeLevelId = student?.GradeLevelId,
-            GradeLevelName = student?.GradeLevel?.Name,
-            SectionId = student?.SectionId,
-            SectionName = student?.Section?.Name,
-            TeacherId = teacher?.Id,
-            EmployeeId = teacher?.EmployeeId,
-            Specialization = teacher?.Specialization
+            Roles = profile?.Roles ?? [],
+            StudentId = profile?.StudentId,
+            StudentIdNumber = profile?.StudentIdNumber,
+            GradeLevelId = profile?.GradeLevelId,
+            GradeLevelName = profile?.GradeLevelName,
+            SectionId = profile?.SectionId,
+            SectionName = profile?.SectionName,
+            TeacherId = profile?.TeacherId,
+            EmployeeId = profile?.EmployeeId,
+            Specialization = profile?.Specialization
         };
     }
 

@@ -351,6 +351,11 @@ BEGIN
 
     CREATE NONCLUSTERED INDEX IX_Students_GradeLevelId_SectionId
         ON dbo.Students (GradeLevelId, SectionId) INCLUDE (StudentIdNumber, IsActive);
+
+    /* The composite above leads with GradeLevelId, so a filter on section alone - the admin
+       roster filtered by section, and the FK back to Sections - could not seek on it. */
+    CREATE NONCLUSTERED INDEX IX_Students_SectionId
+        ON dbo.Students (SectionId) INCLUDE (GradeLevelId, StudentIdNumber, IsActive);
 END
 GO
 
@@ -625,7 +630,10 @@ BEGIN
 
     CREATE NONCLUSTERED INDEX IX_Marks_StudentId_SubjectId
         ON dbo.Marks (StudentId, SubjectId) INCLUDE (AssessmentId, Score, IsPublished);
-    CREATE NONCLUSTERED INDEX IX_Marks_AssessmentId       ON dbo.Marks (AssessmentId) INCLUDE (StudentId, Score);
+    /* IsPublished is included, not a key: the gradebook and the published/total counts on the
+       assessment list both read it for every mark of one assessment. */
+    CREATE NONCLUSTERED INDEX IX_Marks_AssessmentId
+        ON dbo.Marks (AssessmentId) INCLUDE (StudentId, Score, IsPublished);
     CREATE NONCLUSTERED INDEX IX_Marks_SubjectId          ON dbo.Marks (SubjectId);
     CREATE NONCLUSTERED INDEX IX_Marks_EnteredByTeacherId ON dbo.Marks (EnteredByTeacherId);
     CREATE NONCLUSTERED INDEX IX_Marks_IsPublished        ON dbo.Marks (IsPublished) WHERE IsPublished = 1;
@@ -927,6 +935,52 @@ BEGIN
     VALUES (N'Welcome to the Halade High School Portal',
             N'The new academic year is open. Students can view subjects, lesson materials and report cards here. Teachers can manage marks and upload resources.',
             N'All', 1, 1);
+END
+GO
+
+/* ---------------------------------------------------------------------------
+   Index maintenance for databases created by an earlier run of this script
+
+   The CREATE INDEX statements above only execute when their table is created, so the two
+   changes below are repeated here for a database that already exists. Both are shaped by the
+   queries the API actually issues; the columns the portal filters on that are not listed here
+   (Students.UserId, Students.GradeLevelId, Teachers.UserId, Teachers.IsActive,
+   TeacherSubjects.TeacherId, Assessments.SubjectId/SectionId, Marks.AssessmentId) are already
+   covered by an index created with their table.
+   --------------------------------------------------------------------------- */
+IF OBJECT_ID(N'dbo.Students', N'U') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE object_id = OBJECT_ID(N'dbo.Students')
+                     AND name = N'IX_Students_SectionId')
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_Students_SectionId
+        ON dbo.Students (SectionId) INCLUDE (GradeLevelId, StudentIdNumber, IsActive);
+
+    PRINT 'Students: created IX_Students_SectionId.';
+END
+GO
+
+/* Adds IsPublished to the include list so counting an assessment's published marks stays
+   inside the index instead of looking each row up in the table. */
+IF OBJECT_ID(N'dbo.Marks', N'U') IS NOT NULL
+   AND EXISTS (SELECT 1 FROM sys.indexes
+               WHERE object_id = OBJECT_ID(N'dbo.Marks')
+                 AND name = N'IX_Marks_AssessmentId')
+   AND NOT EXISTS (SELECT 1
+                   FROM sys.index_columns AS ic
+                   JOIN sys.columns       AS c ON c.object_id = ic.object_id
+                                              AND c.column_id = ic.column_id
+                   JOIN sys.indexes       AS i ON i.object_id = ic.object_id
+                                              AND i.index_id  = ic.index_id
+                   WHERE i.object_id = OBJECT_ID(N'dbo.Marks')
+                     AND i.name = N'IX_Marks_AssessmentId'
+                     AND c.name = N'IsPublished')
+BEGIN
+    CREATE NONCLUSTERED INDEX IX_Marks_AssessmentId
+        ON dbo.Marks (AssessmentId) INCLUDE (StudentId, Score, IsPublished)
+        WITH (DROP_EXISTING = ON);
+
+    PRINT 'Marks: IX_Marks_AssessmentId now includes IsPublished.';
 END
 GO
 

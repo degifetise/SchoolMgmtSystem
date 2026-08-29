@@ -1,9 +1,11 @@
+using HaladeHighSchool.Api.Data;
 using HaladeHighSchool.Api.DTOs;
 using HaladeHighSchool.Api.Models;
 using HaladeHighSchool.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace HaladeHighSchool.Api.Controllers;
 
@@ -12,6 +14,7 @@ namespace HaladeHighSchool.Api.Controllers;
 [Produces("application/json")]
 public class AuthController : ControllerBase
 {
+    private readonly ApplicationDbContext _db;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly SignInManager<ApplicationUser> _signInManager;
     private readonly ITokenService _tokenService;
@@ -20,6 +23,7 @@ public class AuthController : ControllerBase
     private readonly ILogger<AuthController> _logger;
 
     public AuthController(
+        ApplicationDbContext db,
         UserManager<ApplicationUser> userManager,
         SignInManager<ApplicationUser> signInManager,
         ITokenService tokenService,
@@ -27,6 +31,7 @@ public class AuthController : ControllerBase
         ISystemSettingsService settings,
         ILogger<AuthController> logger)
     {
+        _db = db;
         _userManager = userManager;
         _signInManager = signInManager;
         _tokenService = tokenService;
@@ -90,8 +95,13 @@ public class AuthController : ControllerBase
             });
         }
 
-        user.LastLoginAt = DateTime.UtcNow;
-        await _userManager.UpdateAsync(user);
+        /* UpdateAsync would re-run the Identity user validators - a lookup by user name and
+           another by email - and then rewrite every column including a fresh ConcurrencyStamp,
+           three statements to record a timestamp. This writes the one column, and deliberately
+           leaves the tracked entity alone so the refresh-token save does not rewrite it. */
+        await _db.Users
+            .Where(u => u.Id == user.Id)
+            .ExecuteUpdateAsync(u => u.SetProperty(x => x.LastLoginAt, DateTime.UtcNow), cancellationToken);
 
         var response = await _tokenService.CreateAuthResponseAsync(user, GetIpAddress(), cancellationToken);
         _logger.LogInformation("User {Email} signed in", user.Email);

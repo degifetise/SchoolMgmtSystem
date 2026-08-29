@@ -141,9 +141,14 @@ builder.Services.AddCors(options =>
 // ---------------------------------------------------------------------------
 // Application services
 // ---------------------------------------------------------------------------
+// Backs the SystemSettings and grading-weight caches: two small lookups that every request
+// pipeline used to re-read from SQL Server.
+builder.Services.AddMemoryCache();
+
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddScoped<IAccountProvisioningService, AccountProvisioningService>();
 builder.Services.AddScoped<ISystemSettingsService, SystemSettingsService>();
+builder.Services.AddScoped<IGradingPolicyService, GradingPolicyService>();
 builder.Services.AddScoped<ITeachingAssignmentService, TeachingAssignmentService>();
 builder.Services.AddScoped<IRegistrationRequestService, RegistrationRequestService>();
 builder.Services.AddScoped<IReportCardService, ReportCardService>();

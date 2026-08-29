@@ -22,17 +22,20 @@ public class AssessmentsController : PortalControllerBase
     private readonly ApplicationDbContext _db;
     private readonly ITeachingAssignmentService _assignments;
     private readonly ISystemSettingsService _settings;
+    private readonly IGradingPolicyService _grading;
     private readonly ILogger<AssessmentsController> _logger;
 
     public AssessmentsController(
         ApplicationDbContext db,
         ITeachingAssignmentService assignments,
         ISystemSettingsService settings,
+        IGradingPolicyService grading,
         ILogger<AssessmentsController> logger)
     {
         _db = db;
         _assignments = assignments;
         _settings = settings;
+        _grading = grading;
         _logger = logger;
     }
 
@@ -306,9 +309,7 @@ public class AssessmentsController : PortalControllerBase
             return items;
         }
 
-        var weights = await _db.AssessmentTypeWeights
-            .AsNoTracking()
-            .ToDictionaryAsync(w => w.Name, w => w.WeightPercentage, cancellationToken);
+        var weights = await _grading.GetWeightMapAsync(cancellationToken);
 
         return items
             .Select(a => a with

@@ -28,11 +28,16 @@ public class PublicController : PortalControllerBase
 
     private readonly ApplicationDbContext _db;
     private readonly ISystemSettingsService _settings;
+    private readonly IGradingPolicyService _grading;
 
-    public PublicController(ApplicationDbContext db, ISystemSettingsService settings)
+    public PublicController(
+        ApplicationDbContext db,
+        ISystemSettingsService settings,
+        IGradingPolicyService grading)
     {
         _db = db;
         _settings = settings;
+        _grading = grading;
     }
 
     /// <summary>School identity, headline figures, grades taught and the grading policy.</summary>
@@ -72,17 +77,7 @@ public class PublicController : PortalControllerBase
             Sections = sections.Count
         };
 
-        var weights = await _db.AssessmentTypeWeights
-            .AsNoTracking()
-            .OrderBy(w => w.DisplayOrder)
-            .Select(w => new AssessmentTypeWeightResponse
-            {
-                Name = w.Name,
-                DisplayName = w.DisplayName,
-                WeightPercentage = w.WeightPercentage,
-                DisplayOrder = w.DisplayOrder
-            })
-            .ToListAsync(cancellationToken);
+        var weights = await _grading.GetAllAsync(cancellationToken);
 
         return Ok(new PublicOverviewResponse
         {

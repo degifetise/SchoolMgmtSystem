@@ -3,9 +3,13 @@ using HaladeHighSchool.Api.DTOs;
 namespace HaladeHighSchool.Api.Services;
 
 /// <summary>
-/// Typed access to the admin editable SystemSettings table. Values are read per request
-/// rather than cached, so an administrator's change takes effect on the very next request
-/// and there is no cache to invalidate after a write.
+/// Typed access to the admin editable SystemSettings table. The six rows are held in the
+/// process memory cache for a few minutes and refreshed in place by
+/// <see cref="UpdateSettingsAsync"/>, so an administrator's change still takes effect on the very
+/// next request while ordinary traffic no longer queries the table at all.
+///
+/// A row edited outside the API - directly in SSMS, or by a second instance behind a load
+/// balancer - is picked up when the entry expires rather than immediately.
 /// </summary>
 public interface ISystemSettingsService
 {

@@ -23,6 +23,7 @@ public class MarksController : PortalControllerBase
     private readonly ApplicationDbContext _db;
     private readonly ITeachingAssignmentService _assignments;
     private readonly ISystemSettingsService _settings;
+    private readonly IGradingPolicyService _grading;
     private readonly IReportCardService _reportCards;
     private readonly ILogger<MarksController> _logger;
 
@@ -30,12 +31,14 @@ public class MarksController : PortalControllerBase
         ApplicationDbContext db,
         ITeachingAssignmentService assignments,
         ISystemSettingsService settings,
+        IGradingPolicyService grading,
         IReportCardService reportCards,
         ILogger<MarksController> logger)
     {
         _db = db;
         _assignments = assignments;
         _settings = settings;
+        _grading = grading;
         _reportCards = reportCards;
         _logger = logger;
     }
@@ -73,11 +76,7 @@ public class MarksController : PortalControllerBase
             return denial;
         }
 
-        var weight = await _db.AssessmentTypeWeights
-            .AsNoTracking()
-            .Where(w => w.Name == assessment.AssessmentType.ToString())
-            .Select(w => w.WeightPercentage)
-            .FirstOrDefaultAsync(cancellationToken);
+        var weight = await _grading.GetWeightAsync(assessment.AssessmentType, cancellationToken);
 
         var students = await EligibleStudentsQuery(assessment)
             .OrderBy(s => s.Section!.Code)
@@ -540,20 +539,7 @@ public class MarksController : PortalControllerBase
     public async Task<ActionResult<IEnumerable<AssessmentTypeWeightResponse>>> GetWeights(
         CancellationToken cancellationToken)
     {
-        var weights = await _db.AssessmentTypeWeights
-            .AsNoTracking()
-            .Where(w => w.IsActive)
-            .OrderBy(w => w.DisplayOrder)
-            .Select(w => new AssessmentTypeWeightResponse
-            {
-                Name = w.Name,
-                DisplayName = w.DisplayName,
-                WeightPercentage = w.WeightPercentage,
-                DisplayOrder = w.DisplayOrder
-            })
-            .ToListAsync(cancellationToken);
-
-        return Ok(weights);
+        return Ok(await _grading.GetActiveAsync(cancellationToken));
     }
 
     // -----------------------------------------------------------------------

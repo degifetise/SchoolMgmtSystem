@@ -28,11 +28,16 @@ public class ReportCardService : IReportCardService
 {
     private readonly ApplicationDbContext _db;
     private readonly ISystemSettingsService _settings;
+    private readonly IGradingPolicyService _grading;
 
-    public ReportCardService(ApplicationDbContext db, ISystemSettingsService settings)
+    public ReportCardService(
+        ApplicationDbContext db,
+        ISystemSettingsService settings,
+        IGradingPolicyService grading)
     {
         _db = db;
         _settings = settings;
+        _grading = grading;
     }
 
     public async Task<ReportCardResponse?> BuildAsync(
@@ -115,18 +120,7 @@ public class ReportCardService : IReportCardService
             return null;
         }
 
-        var weights = await _db.AssessmentTypeWeights
-            .AsNoTracking()
-            .Where(w => w.IsActive)
-            .OrderBy(w => w.DisplayOrder)
-            .Select(w => new AssessmentTypeWeightResponse
-            {
-                Name = w.Name,
-                DisplayName = w.DisplayName,
-                WeightPercentage = w.WeightPercentage,
-                DisplayOrder = w.DisplayOrder,
-            })
-            .ToListAsync(cancellationToken);
+        var weights = await _grading.GetActiveAsync(cancellationToken);
 
         /* A subject only appears in the view once it has a published mark, so "marked" is the
            count of components that carry one rather than the number of subjects. */

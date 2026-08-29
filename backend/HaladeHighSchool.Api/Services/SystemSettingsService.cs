@@ -3,6 +3,7 @@ using HaladeHighSchool.Api.Data;
 using HaladeHighSchool.Api.DTOs;
 using HaladeHighSchool.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace HaladeHighSchool.Api.Services;
 
@@ -19,57 +20,39 @@ public class SystemSettingsService : ISystemSettingsService
     private const decimal DefaultPassMark = 50m;
     private const int DefaultMaxUploadMb = 25;
 
-    private readonly ApplicationDbContext _db;
+    private const string CacheKey = "SystemSettings:Snapshot";
 
-    public SystemSettingsService(ApplicationDbContext db)
+    /// <summary>
+    /// A write through this service refreshes the entry immediately, so this only bounds how
+    /// long a row edited directly in SSMS - or by another instance of the API - goes unnoticed.
+    /// </summary>
+    private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
+
+    private readonly ApplicationDbContext _db;
+    private readonly IMemoryCache _cache;
+
+    public SystemSettingsService(ApplicationDbContext db, IMemoryCache cache)
     {
         _db = db;
+        _cache = cache;
     }
 
-    public Task<string?> GetAsync(string key, CancellationToken cancellationToken = default) =>
-        _db.SystemSettings
-            .AsNoTracking()
-            .Where(s => s.Key == key)
-            .Select(s => s.Value)
-            .FirstOrDefaultAsync(cancellationToken);
+    public async Task<string?> GetAsync(string key, CancellationToken cancellationToken = default) =>
+        (await GetSnapshotAsync(cancellationToken)).Value(key);
 
-    public async Task<SystemSettingsResponse> GetSettingsAsync(CancellationToken cancellationToken = default)
-    {
-        var rows = await _db.SystemSettings.AsNoTracking().ToListAsync(cancellationToken);
-
-        string? Value(string key) => rows.FirstOrDefault(r => r.Key == key)?.Value;
-
-        return new SystemSettingsResponse
-        {
-            SchoolName = Value(SchoolNameKey) is { Length: > 0 } name ? name : DefaultSchoolName,
-            ContactEmail = Value(ContactEmailKey),
-            AcademicYear = NormalizeAcademicYear(Value(AcademicYearKey)),
-            PassMarkPercentage = ParsePassMark(Value(PassMarkKey)),
-            MaxUploadSizeMb = ParseMaxUploadMb(Value(MaxUploadSizeKey)),
-            AllowSelfRegistration = ParseSelfRegistration(Value(SelfRegistrationKey)),
-            LastUpdatedAt = rows.Count == 0 ? null : rows.Max(r => r.UpdatedAt)
-        };
-    }
+    public async Task<SystemSettingsResponse> GetSettingsAsync(CancellationToken cancellationToken = default) =>
+        Compose(await GetSnapshotAsync(cancellationToken));
 
     public async Task<SchoolInfoResponse> GetSchoolInfoAsync(CancellationToken cancellationToken = default)
     {
-        var rows = await _db.SystemSettings
-            .AsNoTracking()
-            .Where(s => s.Key == SchoolNameKey
-                     || s.Key == ContactEmailKey
-                     || s.Key == AcademicYearKey
-                     || s.Key == SelfRegistrationKey)
-            .Select(s => new { s.Key, s.Value })
-            .ToListAsync(cancellationToken);
-
-        string? Value(string key) => rows.FirstOrDefault(r => r.Key == key)?.Value;
+        var snapshot = await GetSnapshotAsync(cancellationToken);
 
         return new SchoolInfoResponse
         {
-            SchoolName = Value(SchoolNameKey) is { Length: > 0 } name ? name : DefaultSchoolName,
-            ContactEmail = Value(ContactEmailKey),
-            AcademicYear = NormalizeAcademicYear(Value(AcademicYearKey)),
-            AllowSelfRegistration = ParseSelfRegistration(Value(SelfRegistrationKey))
+            SchoolName = snapshot.Value(SchoolNameKey) is { Length: > 0 } name ? name : DefaultSchoolName,
+            ContactEmail = snapshot.Value(ContactEmailKey),
+            AcademicYear = NormalizeAcademicYear(snapshot.Value(AcademicYearKey)),
+            AllowSelfRegistration = ParseSelfRegistration(snapshot.Value(SelfRegistrationKey))
         };
     }
 
@@ -141,7 +124,12 @@ public class SystemSettingsService : ISystemSettingsService
 
         await _db.SaveChangesAsync(cancellationToken);
 
-        return await GetSettingsAsync(cancellationToken);
+        // Replace rather than evict, so the very next reader is served the values just written
+        // instead of racing to reload them.
+        var snapshot = await LoadSnapshotAsync(cancellationToken);
+        _cache.Set(CacheKey, snapshot, CacheDuration);
+
+        return Compose(snapshot);
     }
 
     public async Task<string> GetAcademicYearAsync(CancellationToken cancellationToken = default) =>
@@ -155,6 +143,48 @@ public class SystemSettingsService : ISystemSettingsService
 
     public async Task<bool> IsSelfRegistrationAllowedAsync(CancellationToken cancellationToken = default) =>
         ParseSelfRegistration(await GetAsync(SelfRegistrationKey, cancellationToken));
+
+    /// <summary>
+    /// All six rows, read once and then served from memory. Every accessor on this service goes
+    /// through here, so a request that needs the pass mark and the academic year costs one query
+    /// on a cold cache and none on a warm one.
+    /// </summary>
+    private async Task<SettingsSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
+    {
+        if (_cache.TryGetValue(CacheKey, out SettingsSnapshot? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var snapshot = await LoadSnapshotAsync(cancellationToken);
+        _cache.Set(CacheKey, snapshot, CacheDuration);
+
+        return snapshot;
+    }
+
+    private async Task<SettingsSnapshot> LoadSnapshotAsync(CancellationToken cancellationToken)
+    {
+        var rows = await _db.SystemSettings
+            .AsNoTracking()
+            .Select(s => new { s.Key, s.Value, s.UpdatedAt })
+            .ToListAsync(cancellationToken);
+
+        return new SettingsSnapshot(
+            rows.ToDictionary(r => r.Key, r => r.Value, StringComparer.OrdinalIgnoreCase),
+            rows.Count == 0 ? null : rows.Max(r => r.UpdatedAt));
+    }
+
+    private static SystemSettingsResponse Compose(SettingsSnapshot snapshot) =>
+        new()
+        {
+            SchoolName = snapshot.Value(SchoolNameKey) is { Length: > 0 } name ? name : DefaultSchoolName,
+            ContactEmail = snapshot.Value(ContactEmailKey),
+            AcademicYear = NormalizeAcademicYear(snapshot.Value(AcademicYearKey)),
+            PassMarkPercentage = ParsePassMark(snapshot.Value(PassMarkKey)),
+            MaxUploadSizeMb = ParseMaxUploadMb(snapshot.Value(MaxUploadSizeKey)),
+            AllowSelfRegistration = ParseSelfRegistration(snapshot.Value(SelfRegistrationKey)),
+            LastUpdatedAt = snapshot.LastUpdatedAt
+        };
 
     /// <summary>
     /// The database CHECK constraints only accept yyyy-yyyy, so never pass anything else on.
@@ -190,4 +220,15 @@ public class SystemSettingsService : ISystemSettingsService
         value[4] == '-' &&
         value[..4].All(char.IsAsciiDigit) &&
         value[5..].All(char.IsAsciiDigit);
+
+    /// <summary>
+    /// Immutable copy of the table. Held by the singleton cache and shared across requests, so it
+    /// must never expose anything a caller could mutate.
+    /// </summary>
+    private sealed record SettingsSnapshot(
+        IReadOnlyDictionary<string, string?> Values,
+        DateTime? LastUpdatedAt)
+    {
+        public string? Value(string key) => Values.TryGetValue(key, out var value) ? value : null;
+    }
 }
