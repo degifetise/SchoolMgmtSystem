@@ -2,25 +2,15 @@ using Microsoft.AspNetCore.Identity;
 
 namespace HaladeHighSchool.Api.Models;
 
-/// <summary>
-/// Identity user for the portal. Maps to the AspNetUsers table created in Phase 1,
-/// including the school specific columns appended to the default Identity schema.
-/// </summary>
-public class ApplicationUser : IdentityUser
+public class ApplicationUser : IdentityUser<int>
 {
-    public string FullName { get; set; } = string.Empty;
-
-    public string? ProfileImageUrl { get; set; }
-
-    public bool IsActive { get; set; } = true;
-
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = false;
+    public string ApprovalStatus { get; set; } = "Pending"; // Pending, Approved, Rejected
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    public DateTime? LastLoginAt { get; set; }
-
-    public Student? Student { get; set; }
-
-    public Teacher? Teacher { get; set; }
-
-    public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+    public virtual Student? Student { get; set; }
+    public virtual Teacher? Teacher { get; set; }
+    public virtual ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
 }

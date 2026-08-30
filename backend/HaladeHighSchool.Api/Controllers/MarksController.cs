@@ -191,7 +191,6 @@ public class MarksController : PortalControllerBase
             {
                 StudentId = request.StudentId,
                 AssessmentId = request.AssessmentId,
-                // Taken from the assessment: the database trigger rejects any mismatch.
                 SubjectId = assessment.SubjectId,
                 EnteredByTeacherId = teacherId.Value,
                 CreatedAt = DateTime.UtcNow
@@ -491,9 +490,6 @@ public class MarksController : PortalControllerBase
         return Ok(marks);
     }
 
-    // A student reads their own results from GET api/students/my-results, which returns the same
-    // figures plus the summary and weighting their screen needs.
-
     /// <summary>All marks for one student, including unpublished ones.</summary>
     [HttpGet("student/{studentId:int}")]
     [Authorize(Roles = Roles.AdminOrTeacher)]
@@ -546,10 +542,6 @@ public class MarksController : PortalControllerBase
     // Helpers
     // -----------------------------------------------------------------------
 
-    /// <summary>
-    /// Returns null when the caller may manage the assessment, otherwise the 403 result to
-    /// return. Admins always pass; teachers must own the subject/section in TeacherSubjects.
-    /// </summary>
     private async Task<ActionResult?> AuthoriseAssessmentAsync(
         Assessment assessment,
         CancellationToken cancellationToken)
@@ -573,10 +565,6 @@ public class MarksController : PortalControllerBase
             : ForbiddenProblem("You are not assigned to teach this subject to this section.");
     }
 
-    /// <summary>
-    /// Students who may receive a mark for the assessment: same grade level as the subject,
-    /// and same section when the assessment targets a single section.
-    /// </summary>
     private IQueryable<Student> EligibleStudentsQuery(Assessment assessment)
     {
         var query = _db.Students
@@ -593,10 +581,6 @@ public class MarksController : PortalControllerBase
         return query;
     }
 
-    /// <summary>
-    /// Marks are attributed to a teacher, not to the signed-in account: when an admin
-    /// enters marks the assessment's own teacher, or the assigned subject teacher, is used.
-    /// </summary>
     private async Task<int?> ResolveEnteringTeacherIdAsync(
         Assessment assessment,
         CancellationToken cancellationToken)
@@ -669,5 +653,4 @@ public class MarksController : PortalControllerBase
     private async Task<MarkResponse?> BuildMarkResponseAsync(int markId, CancellationToken cancellationToken) =>
         await ProjectMarks(_db.Marks.AsNoTracking().Where(m => m.Id == markId))
             .FirstOrDefaultAsync(cancellationToken);
-
 }
